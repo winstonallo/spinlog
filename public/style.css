@@ -1,0 +1,188 @@
+/* SoundCloud-inspired dark theme for Musicboxd */
+
+/* Box-sizing reset */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* Base */
+body {
+  background-color: #111111;
+  color: #ffffff;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  min-height: 100vh;
+}
+
+/* Site header */
+.site-header {
+  background-color: #1a1a1a;
+  border-bottom: 1px solid #2a2a2a;
+  padding: 0 32px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+}
+
+.logo {
+  color: #ff5500;
+  font-weight: 700;
+  font-size: 1.3rem;
+  letter-spacing: -0.02em;
+}
+
+/* Main content area */
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 32px 24px;
+}
+
+/* Search form */
+.search-form {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  margin-bottom: 32px;
+}
+
+.search-input {
+  flex: 1;
+  background-color: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  border-radius: 4px;
+  color: #ffffff;
+  font-size: 1rem;
+  padding: 10px 16px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.search-input:focus {
+  border-color: #ff5500;
+}
+
+.search-input::placeholder {
+  color: #888888;
+}
+
+.search-btn {
+  background-color: #ff5500;
+  border: none;
+  border-radius: 4px;
+  color: #ffffff;
+  font-weight: 700;
+  padding: 10px 24px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  font-size: 1rem;
+}
+
+.search-btn:hover {
+  background-color: #e64d00;
+}
+
+/* Results list */
+.results-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* Result card */
+.result-card {
+  background-color: #1a1a1a;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.result-card:hover {
+  background-color: #222222;
+  border-color: #444444;
+}
+
+/* Cover art */
+.result-cover {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 3px;
+  flex-shrink: 0;
+  background-color: #333333;
+}
+
+/* Text info container */
+.result-info {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Title */
+.result-title {
+  display: block;
+  color: #ffffff;
+  font-weight: 600;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Artist */
+.result-artist {
+  display: block;
+  color: #cccccc;
+  font-size: 0.875rem;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Meta row */
+.result-meta {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+  font-size: 0.75rem;
+  color: #888888;
+}
+
+/* Release type pill */
+.result-type {
+  background-color: #2a2a2a;
+  border-radius: 2px;
+  padding: 2px 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 0.7rem;
+}
+
+/* Year */
+.result-year {
+  color: #888888;
+}
+
+/* Score */
+.result-score {
+  color: #ff5500;
+  font-weight: 600;
+}
+
+/* Status messages */
+.status-msg {
+  color: #888888;
+  text-align: center;
+  padding: 48px 0;
+  font-size: 0.95rem;
+}

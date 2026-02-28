@@ -67,6 +67,7 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
             <head>
                 <meta charset="utf-8"/>
                 <meta name="viewport" content="width=device-width, initial-scale=1"/>
+                <link rel="stylesheet" href="/style.css"/>
                 <AutoReload options=options.clone()/>
                 <HydrationScripts options/>
                 <MetaTags/>
@@ -142,20 +143,23 @@ fn HomePage() -> impl IntoView {
     );
 
     view! {
-        <h1>"Musicboxd"</h1>
-        <form on:submit=move |ev| {
+        <header class="site-header">
+            <span class="logo">"Musicboxd"</span>
+        </header>
+        <form class="search-form" on:submit=move |ev| {
             ev.prevent_default();
             set_query.set(input.get_untracked());
         }>
             <input
+                class="search-input"
                 type="text"
                 placeholder="Search for music..."
                 prop:value=move || input.get()
                 on:input=move |ev| set_input.set(event_target_value(&ev))
             />
-            <button type="submit">"Search"</button>
+            <button class="search-btn" type="submit">"Search"</button>
         </form>
-        <Suspense fallback=move || view! { <p>"Searching..."</p> }>
+        <Suspense fallback=move || view! { <p class="status-msg">"Searching..."</p> }>
             {move || {
                 if query.get().trim().is_empty() {
                     return Some(view! { <></> }.into_any());
@@ -163,11 +167,11 @@ fn HomePage() -> impl IntoView {
                 results.get().map(|res| {
                     match res {
                         Ok(groups) if groups.is_empty() => {
-                            view! { <p>"No results found."</p> }.into_any()
+                            view! { <p class="status-msg">"No results found."</p> }.into_any()
                         }
                         Ok(groups) => {
                             view! {
-                                <ul>
+                                <ul class="results-list">
                                     {groups.into_iter().map(|rg| {
                                         let cover_url = format!(
                                             "https://coverartarchive.org/release-group/{}/front-250",
@@ -178,18 +182,16 @@ fn HomePage() -> impl IntoView {
                                         let release_type = format_type(&rg.primary_type, &rg.secondary_types);
                                         let score = rg.score.unwrap_or(0);
                                         view! {
-                                            <li>
-                                                <img src=cover_url alt="Album cover" width="250" height="250"/>
-                                                <div>
-                                                    <strong>{rg.title}</strong>
-                                                    <span>" — "</span>
-                                                    <span>{artist}</span>
-                                                    <span>" ("</span>
-                                                    <span>{year}</span>
-                                                    <span>") ["</span>
-                                                    <span>{release_type}</span>
-                                                    <span>"] ["</span>
-                                                    <span>{score}"%]"</span>
+                                            <li class="result-card">
+                                                <img class="result-cover" src=cover_url alt="Album cover" width="72" height="72"/>
+                                                <div class="result-info">
+                                                    <span class="result-title">{rg.title}</span>
+                                                    <span class="result-artist">{artist}</span>
+                                                    <div class="result-meta">
+                                                        <span class="result-type">{release_type}</span>
+                                                        <span class="result-year">{year}</span>
+                                                        <span class="result-score">{score}"%"</span>
+                                                    </div>
                                                 </div>
                                             </li>
                                         }
@@ -198,7 +200,7 @@ fn HomePage() -> impl IntoView {
                             }.into_any()
                         }
                         Err(e) => {
-                            view! { <p>"Error: " {e.to_string()}</p> }.into_any()
+                            view! { <p class="status-msg">"Error: " {e.to_string()}</p> }.into_any()
                         }
                     }
                 })
