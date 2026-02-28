@@ -37,6 +37,7 @@ leptos_meta = { version = "0.7" }
 leptos_router = { version = "0.7" }
 wasm-bindgen = "0.2"
 console_error_panic_hook = "0.1"
+serde = { version = "1", features = ["derive"] }
 
 [dependencies.leptos_axum]
 version = "0.7"
@@ -60,6 +61,11 @@ version = "1"
 features = ["rt-multi-thread", "macros"]
 optional = true
 
+[dependencies.reqwest]
+version = "0.12"
+features = ["json"]
+optional = true
+
 [features]
 hydrate = [
     "leptos/hydrate",
@@ -70,6 +76,7 @@ ssr = [
     "dep:tower-http",
     "dep:tokio",
     "dep:leptos_axum",
+    "dep:reqwest",
     "leptos/ssr",
     "leptos_meta/ssr",
     "leptos_router/ssr",

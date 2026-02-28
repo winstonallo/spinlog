@@ -4,7 +4,7 @@
   "identifier": "com.musicboxd.app",
   "build": {
     "beforeDevCommand": "cargo leptos watch",
-    "devUrl": "http://localhost:9090",
+    "devUrl": "http://127.0.0.1:9090",
     "beforeBuildCommand": "cargo leptos build --release",
     "frontendDist": "../target/site"
   },
@@ -23,6 +23,6 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": []
+    "icon": ["icons/icon.png", "icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png"]
   }
 }
