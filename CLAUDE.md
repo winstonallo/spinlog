@@ -56,7 +56,11 @@ The app is **Leptos 0.7 SSR** with Axum. `cargo leptos watch` compiles two targe
 
 ## Documentation
 
-Keep documentation up to date as you go. When you add or change a feature, update the relevant docs (README, CLAUDE.md, inline comments, etc.) in the same commit. Do not leave documentation for a later pass.
+Keep documentation up to date as you go. When you add or change a feature, update the relevant docs (README, CLAUDE.md, etc.) in the same commit. Do not leave documentation for a later pass.
+
+Function docs should explain the **reasoning** behind a function — why it exists, why it's designed this way, what invariants it assumes — not what it does. The code is the source of truth for what; the doc is the source of truth for why.
+
+Do not add inline comments unless the code is doing something non-obvious that cannot be made clear by restructuring. If a block of code needs explaining, extract it into a well-named function instead of annotating it.
 
 ## Skills
 
