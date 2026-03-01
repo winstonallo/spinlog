@@ -66,6 +66,8 @@ Do not add inline comments unless the code is doing something non-obvious that c
 
 Create Claude Code skills (in `.claude/skills/`) for distinct, repeatable aspects of the codebase — e.g. running tests, building, seeding the database, scaffolding a new feature. Each skill should be scoped to one concern and documented with a short description.
 
+Skills are tracked in version control like any other source file. The `.claude/skills/` directory is part of the repo — commit new and updated skills alongside the code changes that motivate them. Do not leave skills outside the repo or in a personal config directory.
+
 ## Error handling
 
 Errors must never be silently swallowed. Every error must be handled explicitly and propagated with enough context to identify its origin at every level of the call stack. Use structured error types rather than stringly-typed messages, and add context when wrapping errors as they propagate upward. A log line or a panic is acceptable at a top-level boundary; silently discarding an error is never acceptable.

@@ -3,3 +3,10 @@ target/
 
 # Misc
 .DS_Store
+
+# Claude Code local settings (personal, not shared)
+.claude/settings.local.json
+
+# SQLite database files
+musicboxd.db
+musicboxd.db-*
