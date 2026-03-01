@@ -42,6 +42,17 @@ struct MbResponse {
 }
 
 #[server]
+pub async fn get_current_user() -> Result<Option<String>, ServerFnError> {
+    use crate::auth::server::get_session_user;
+    use leptos_axum::extract;
+    use axum::http::HeaderMap;
+    let headers: HeaderMap = extract().await?;
+    let pool = leptos::prelude::use_context::<sqlx::SqlitePool>()
+        .ok_or_else(|| ServerFnError::new("no db pool"))?;
+    Ok(get_session_user(&pool, &headers).await.map(|(_, username)| username))
+}
+
+#[server]
 pub async fn search_music(query: String) -> Result<Vec<ReleaseGroup>, ServerFnError> {
     let client = reqwest::Client::new();
     let response = client
@@ -131,6 +142,8 @@ fn HomePage() -> impl IntoView {
     let (input, set_input) = signal(String::new());
     let (query, set_query) = signal(String::new());
 
+    let current_user = Resource::new(|| (), |_| get_current_user());
+
     let results = Resource::new(
         move || query.get(),
         |q| async move {
@@ -145,6 +158,22 @@ fn HomePage() -> impl IntoView {
     view! {
         <header class="site-header">
             <span class="logo">"Musicboxd"</span>
+            <div class="header-auth">
+                <Suspense fallback=|| ()>
+                    {move || current_user.get().map(|res| {
+                        match res {
+                            Ok(Some(username)) => view! {
+                                <span class="auth-user">{username}</span>
+                                <a class="auth-link" href="/auth/logout">"Sign out"</a>
+                            }.into_any(),
+                            _ => view! {
+                                <a class="auth-link" href="/auth/google">"Sign in with Google"</a>
+                                <a class="auth-link" href="/auth/github">"Sign in with GitHub"</a>
+                            }.into_any(),
+                        }
+                    })}
+                </Suspense>
+            </div>
         </header>
         <form class="search-form" on:submit=move |ev| {
             ev.prevent_default();

@@ -76,6 +76,15 @@ version = "1"
 features = ["v4"]
 optional = true
 
+[dependencies.oauth2]
+version = "5"
+features = ["reqwest"]
+optional = true
+
+[dev-dependencies]
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "migrate"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
 [features]
 hydrate = [
     "leptos/hydrate",
@@ -89,6 +98,7 @@ ssr = [
     "dep:reqwest",
     "dep:sqlx",
     "dep:uuid",
+    "dep:oauth2",
     "leptos/ssr",
     "leptos_meta/ssr",
     "leptos_router/ssr",
