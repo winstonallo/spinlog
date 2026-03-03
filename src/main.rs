@@ -33,8 +33,7 @@ async fn main() {
         .await
         .expect("failed to run migrations");
 
-    let base_url =
-        std::env::var("BASE_URL").unwrap_or_else(|_| format!("http://{}", addr));
+    let base_url = std::env::var("BASE_URL").unwrap_or_else(|_| format!("http://{}", addr));
 
     let oauth_config = OAuthConfig::from_env(&base_url).unwrap_or_else(|e| {
         eprintln!("Warning: OAuth not configured ({e}). Sign-in will be unavailable.");

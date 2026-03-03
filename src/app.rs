@@ -164,11 +164,11 @@ fn HomePage() -> impl IntoView {
                         match res {
                             Ok(Some(username)) => view! {
                                 <span class="auth-user">{username}</span>
-                                <a class="auth-link" href="/auth/logout">"Sign out"</a>
+                                <a class="auth-link" rel="external" href="/auth/logout">"Sign out"</a>
                             }.into_any(),
                             _ => view! {
-                                <a class="auth-link" href="/auth/google">"Sign in with Google"</a>
-                                <a class="auth-link" href="/auth/github">"Sign in with GitHub"</a>
+                                <a class="auth-link" rel="external" href="/auth/google">"Sign in with Google"</a>
+                                <a class="auth-link" rel="external" href="/auth/github">"Sign in with GitHub"</a>
                             }.into_any(),
                         }
                     })}
