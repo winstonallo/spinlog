@@ -15,6 +15,25 @@ pub mod server {
     use uuid::Uuid;
 
     #[derive(Clone)]
+    pub struct CurrentUser {
+        pub user_id: String,
+        pub username: String,
+    }
+
+    pub async fn session_auth(
+        Extension(pool): Extension<SqlitePool>,
+        mut request: axum::extract::Request,
+        next: axum::middleware::Next,
+    ) -> axum::response::Response {
+        let headers = request.headers().clone();
+        let user = get_session_user(&pool, &headers)
+            .await
+            .map(|(user_id, username)| CurrentUser { user_id, username });
+        request.extensions_mut().insert(user);
+        next.run(request).await
+    }
+
+    #[derive(Clone)]
     pub struct OAuthConfig {
         pub google_client_id: String,
         pub google_client_secret: String,
