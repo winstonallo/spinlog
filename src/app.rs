@@ -74,6 +74,15 @@ pub struct SearchPage {
     pub total: usize,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserSearchResult {
+    pub username: String,
+    pub bio: Option<String>,
+    pub follower_count: i64,
+    pub is_following: bool,
+    pub is_self: bool,
+}
+
 #[server]
 pub async fn get_current_user() -> Result<Option<String>, ServerFnError> {
     use crate::auth::server::CurrentUser;
@@ -388,6 +397,59 @@ pub async fn unfollow_user(target_username: String) -> Result<(), ServerFnError>
     Ok(())
 }
 
+#[server]
+pub async fn search_users(query: String) -> Result<Vec<UserSearchResult>, ServerFnError> {
+    use crate::auth::server::CurrentUser;
+    use axum::Extension;
+    use sqlx::{Row, SqlitePool};
+
+    let Extension(pool): Extension<SqlitePool> = leptos_axum::extract().await?;
+    let Extension(viewer): Extension<Option<CurrentUser>> = leptos_axum::extract().await?;
+
+    let query = query.trim().to_string();
+    if query.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Empty string never matches a real UUID, so the LEFT JOIN naturally
+    // produces is_following = 0 for unauthenticated visitors.
+    let viewer_id = viewer.as_ref().map(|v| v.user_id.clone()).unwrap_or_default();
+    let pattern = format!("%{}%", query.replace('%', "\\%").replace('_', "\\_"));
+
+    let rows = sqlx::query(
+        "SELECT u.user_id, u.username, u.bio, \
+         (SELECT COUNT(*) FROM follows WHERE followee_id = u.user_id) AS follower_count, \
+         CASE WHEN f.follower_id IS NOT NULL THEN 1 ELSE 0 END AS is_following \
+         FROM users u \
+         LEFT JOIN follows f ON f.follower_id = ? AND f.followee_id = u.user_id \
+         WHERE u.username LIKE ? ESCAPE '\\' \
+         ORDER BY u.username \
+         LIMIT 50",
+    )
+    .bind(&viewer_id)
+    .bind(&pattern)
+    .fetch_all(&pool)
+    .await
+    .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+    let results = rows
+        .into_iter()
+        .map(|row| {
+            let user_id: String = row.get("user_id");
+            let is_following: bool = row.get::<i64, _>("is_following") != 0;
+            UserSearchResult {
+                username: row.get("username"),
+                bio: row.get("bio"),
+                follower_count: row.get("follower_count"),
+                is_following,
+                is_self: user_id == viewer_id,
+            }
+        })
+        .collect();
+
+    Ok(results)
+}
+
 pub fn shell(options: LeptosOptions) -> impl IntoView {
     view! {
         <!DOCTYPE html>
@@ -416,6 +478,7 @@ pub fn App() -> impl IntoView {
             <main>
                 <FlatRoutes fallback=|| "Page not found.".into_view()>
                     <Route path=StaticSegment("") view=HomePage/>
+                    <Route path=StaticSegment("users") view=UserSearchPage/>
                     <Route path=(StaticSegment("album"), ParamSegment("id")) view=AlbumPage/>
                     <Route path=(StaticSegment("user"), ParamSegment("username")) view=ProfilePage/>
                 </FlatRoutes>
@@ -478,6 +541,7 @@ fn HomePage() -> impl IntoView {
     view! {
         <header class="site-header">
             <span class="logo">"Musicboxd"</span>
+            <A href="/users" attr:class="auth-link" attr:style="margin-left: 24px">"People"</A>
             <div class="header-auth">
                 <Suspense fallback=|| ()>
                     {move || current_user.get().map(|res| {
@@ -592,6 +656,7 @@ fn AlbumPage() -> impl IntoView {
     view! {
         <header class="site-header">
             <A href="/" attr:class="logo">"Musicboxd"</A>
+            <A href="/users" attr:class="auth-link" attr:style="margin-left: 24px">"People"</A>
         </header>
         <Suspense fallback=move || view! { <p class="status-msg">"Loading..."</p> }>
             {move || detail.get().map(|res| match res {
@@ -646,11 +711,12 @@ fn AlbumPage() -> impl IntoView {
                                         <div class="rating-widget">
                                             <span class="rating-label">"Your rating: "</span>
                                             {(1u8..=10).map(|dot| {
-                                                let active = rating.map(|r| r >= dot).unwrap_or(false);
+                                                let selected = rating.map(|r| r == dot).unwrap_or(false);
+                                                let active = rating.map(|r| r > dot).unwrap_or(false);
                                                 let sid2 = sid.clone();
                                                 view! {
                                                     <button
-                                                        class=move || if active { "rating-dot active" } else { "rating-dot" }
+                                                        class=move || if selected { "rating-dot selected" } else if active { "rating-dot active" } else { "rating-dot" }
                                                         on:click=move |_| {
                                                             let s = sid2.clone();
                                                             leptos::task::spawn_local(async move {
@@ -689,6 +755,7 @@ fn ProfilePage() -> impl IntoView {
     view! {
         <header class="site-header">
             <A href="/" attr:class="logo">"Musicboxd"</A>
+            <A href="/users" attr:class="auth-link" attr:style="margin-left: 24px">"People"</A>
         </header>
         <Suspense fallback=move || view! { <p class="status-msg">"Loading..."</p> }>
             {move || profile.get().map(|res| match res {
@@ -829,6 +896,137 @@ fn ProfilePage() -> impl IntoView {
                         </Suspense>
                     }.into_any()
                 }
+            })}
+        </Suspense>
+    }
+}
+
+#[component]
+fn UserSearchPage() -> impl IntoView {
+    let query_map = use_query_map();
+    let navigate = use_navigate();
+
+    let url_q = move || query_map.read().get("q").unwrap_or_default();
+    let (input, set_input) = signal(url_q());
+    Effect::new(move |_| set_input.set(url_q()));
+
+    let current_user = Resource::new(|| (), |_| get_current_user());
+    let results = Resource::new(url_q, |q| async move { search_users(q).await });
+
+    view! {
+        <header class="site-header">
+            <A href="/" attr:class="logo">"Musicboxd"</A>
+            <A href="/users" attr:class="auth-link" attr:style="margin-left: 24px">"People"</A>
+            <div class="header-auth">
+                <Suspense fallback=|| ()>
+                    {move || current_user.get().map(|res| {
+                        match res {
+                            Ok(Some(username)) => view! {
+                                <A href=format!("/user/{}", username) attr:class="auth-user">{username.clone()}</A>
+                                <a class="auth-link" rel="external" href="/auth/logout">"Sign out"</a>
+                            }.into_any(),
+                            _ => view! {
+                                <a class="auth-link oauth-btn" rel="external" href="/auth/google">
+                                    <img class="oauth-icon" src="/google-icon.svg" alt="" width="14" height="14"/>
+                                    "Sign in with Google"
+                                </a>
+                                <a class="auth-link oauth-btn" rel="external" href="/auth/github">
+                                    <img class="oauth-icon" src="/github-icon.svg" alt="" width="14" height="14"/>
+                                    "Sign in with GitHub"
+                                </a>
+                            }.into_any(),
+                        }
+                    })}
+                </Suspense>
+            </div>
+        </header>
+        <form class="search-form" on:submit=move |ev| {
+            ev.prevent_default();
+            let q = input.get_untracked();
+            let dest = if q.trim().is_empty() {
+                "/users".to_string()
+            } else {
+                format!("/users?q={}", url_encode_query(&q))
+            };
+            navigate(&dest, Default::default());
+        }>
+            <input
+                class="search-input"
+                type="text"
+                placeholder="Search for users..."
+                prop:value=move || input.get()
+                on:input=move |ev| set_input.set(event_target_value(&ev))
+            />
+            <button class="search-btn" type="submit">"Search"</button>
+        </form>
+        <Suspense fallback=move || {
+            if url_q().trim().is_empty() {
+                view! { <p class="status-msg">"Search for users by username."</p> }.into_any()
+            } else {
+                view! { <p class="status-msg">"Searching..."</p> }.into_any()
+            }
+        }>
+            {move || results.get().map(|res| match res {
+                Err(e) => view! {
+                    <p class="status-msg">"Error: " {e.to_string()}</p>
+                }.into_any(),
+                Ok(rs) if rs.is_empty() && !url_q().trim().is_empty() => view! {
+                    <p class="status-msg">"No users found."</p>
+                }.into_any(),
+                Ok(rs) if rs.is_empty() => view! {
+                    <p class="status-msg">"Search for users by username."</p>
+                }.into_any(),
+                Ok(rs) => view! {
+                    <ul class="results-list">
+                        {rs.into_iter().map(|user| {
+                            let initial = user.username.chars().next().unwrap_or('?').to_uppercase().to_string();
+                            let href = format!("/user/{}", user.username);
+                            let followers = user.follower_count;
+                            let username = user.username.clone();
+                            let username_for_btn = username.clone();
+                            let is_self = user.is_self;
+                            let is_following = user.is_following;
+                            view! {
+                                <li class="result-card">
+                                    <div class="user-result">
+                                        <A href=href attr:class="user-result-link">
+                                            <div class="profile-avatar user-avatar">{initial}</div>
+                                            <div class="result-info">
+                                                <span class="result-title">{username.clone()}</span>
+                                                {user.bio.as_deref().filter(|b| !b.is_empty()).map(|b| view! {
+                                                    <span class="result-artist">{b.to_string()}</span>
+                                                })}
+                                                <div class="result-meta">
+                                                    <span class="result-year">{followers} " followers"</span>
+                                                </div>
+                                            </div>
+                                        </A>
+                                        {(!is_self).then(|| {
+                                            let uname = username_for_btn.clone();
+                                            let btn_class = if is_following { "follow-btn following" } else { "follow-btn" };
+                                            let btn_label = if is_following { "Unfollow" } else { "Follow" };
+                                            view! {
+                                                <div class="user-result-actions">
+                                                    <button class=btn_class on:click=move |_| {
+                                                        let u = uname.clone();
+                                                        leptos::task::spawn_local(async move {
+                                                            if is_following {
+                                                                let _ = unfollow_user(u).await;
+                                                            } else {
+                                                                let _ = follow_user(u).await;
+                                                            }
+                                                            results.refetch();
+                                                        });
+                                                    }>{btn_label}</button>
+                                                </div>
+                                            }
+                                        })}
+                                    </div>
+                                </li>
+                            }
+                        }).collect_view()}
+                    </ul>
+                }.into_any(),
             })}
         </Suspense>
     }
