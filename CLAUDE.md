@@ -74,6 +74,17 @@ Skills are tracked in version control like any other source file. The `.claude/s
 
 Errors must never be silently swallowed. Every error must be handled explicitly and propagated with enough context to identify its origin at every level of the call stack. Use structured error types rather than stringly-typed messages, and add context when wrapping errors as they propagate upward. A log line or a panic is acceptable at a top-level boundary; silently discarding an error is never acceptable.
 
+## Modularity
+
+Keep code modular to minimise merge conflicts when multiple agents work on the codebase simultaneously. Concretely:
+
+- **One module per concern.** Each page, feature, or domain concept belongs in its own file (`src/ratings.rs`, `src/profile.rs`, etc.) rather than piled into a single monolithic file. `app.rs` should only contain the router and top-level shell — not business logic.
+- **Small, focused files.** A file that grows beyond ~200 lines is a signal to split it. Extract server fns, components, and types into purpose-named modules as they accumulate.
+- **Avoid editing the same file for unrelated changes.** If two features touch different concerns, they must live in different files so agents can work on them in parallel without conflict.
+- **Stable public interfaces.** When splitting a module, preserve the public interface so other modules and tests don't need to change. Re-export from the parent module if necessary.
+
+When adding a new feature, create a new module for it rather than appending to an existing file.
+
 ## Simplicity
 
 Prefer the simplest solution that fully meets the requirements. Do not add complexity in anticipation of future needs. When a simpler approach requires dropping or limiting functionality, flag the tradeoff explicitly and get approval before proceeding — never silently sacrifice features for the sake of cleaner code.
