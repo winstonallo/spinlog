@@ -488,8 +488,7 @@ pub mod server {
         let username = generate_username(pool, username_hint).await?;
 
         sqlx::query(
-            "INSERT OR IGNORE INTO users (user_id, username, email, password_hash) \
-             VALUES (?, ?, ?, '')",
+            "INSERT OR IGNORE INTO users (user_id, username, email) VALUES (?, ?, ?)",
         )
         .bind(&user_id)
         .bind(&username)
