@@ -74,6 +74,13 @@ pub struct SearchPage {
     pub total: usize,
 }
 
+/// A page of followers or following users, with a flag indicating whether more exist.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FollowPage {
+    pub users: Vec<UserSearchResult>,
+    pub has_more: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserSearchResult {
     pub username: String,
@@ -450,6 +457,157 @@ pub async fn search_users(query: String) -> Result<Vec<UserSearchResult>, Server
     Ok(results)
 }
 
+#[server]
+pub async fn get_followers(
+    username: String,
+    query: String,
+    page: u32,
+) -> Result<FollowPage, ServerFnError> {
+    use crate::auth::server::CurrentUser;
+    use axum::Extension;
+    use sqlx::{Row, SqlitePool};
+
+    let Extension(pool): Extension<SqlitePool> = leptos_axum::extract().await?;
+    let Extension(viewer): Extension<Option<CurrentUser>> = leptos_axum::extract().await?;
+
+    let page = page.max(1);
+    let offset = (page - 1) * 20;
+    let viewer_id = viewer.as_ref().map(|v| v.user_id.clone()).unwrap_or_default();
+    let pattern = format!("%{}%", query.replace('%', "\\%").replace('_', "\\_"));
+
+    let rows = sqlx::query(
+        "SELECT u.user_id, u.username, u.bio, \
+         (SELECT COUNT(*) FROM follows WHERE followee_id = u.user_id) AS follower_count, \
+         CASE WHEN vf.follower_id IS NOT NULL THEN 1 ELSE 0 END AS is_following \
+         FROM users u \
+         INNER JOIN follows f ON f.follower_id = u.user_id \
+                              AND f.followee_id = (SELECT user_id FROM users WHERE username = ?) \
+         LEFT JOIN follows vf ON vf.follower_id = ? AND vf.followee_id = u.user_id \
+         WHERE (? = '' OR u.username LIKE ? ESCAPE '\\') \
+         ORDER BY u.username \
+         LIMIT 21 OFFSET ?",
+    )
+    .bind(&username)
+    .bind(&viewer_id)
+    .bind(&query)
+    .bind(&pattern)
+    .bind(offset as i64)
+    .fetch_all(&pool)
+    .await
+    .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+    let has_more = rows.len() > 20;
+    let users = rows
+        .into_iter()
+        .take(20)
+        .map(|row| {
+            let user_id: String = row.get("user_id");
+            let is_following: bool = row.get::<i64, _>("is_following") != 0;
+            UserSearchResult {
+                username: row.get("username"),
+                bio: row.get("bio"),
+                follower_count: row.get("follower_count"),
+                is_following,
+                is_self: user_id == viewer_id,
+            }
+        })
+        .collect();
+
+    Ok(FollowPage { users, has_more })
+}
+
+#[server]
+pub async fn get_following(
+    username: String,
+    query: String,
+    page: u32,
+) -> Result<FollowPage, ServerFnError> {
+    use crate::auth::server::CurrentUser;
+    use axum::Extension;
+    use sqlx::{Row, SqlitePool};
+
+    let Extension(pool): Extension<SqlitePool> = leptos_axum::extract().await?;
+    let Extension(viewer): Extension<Option<CurrentUser>> = leptos_axum::extract().await?;
+
+    let page = page.max(1);
+    let offset = (page - 1) * 20;
+    let viewer_id = viewer.as_ref().map(|v| v.user_id.clone()).unwrap_or_default();
+    let pattern = format!("%{}%", query.replace('%', "\\%").replace('_', "\\_"));
+
+    let rows = sqlx::query(
+        "SELECT u.user_id, u.username, u.bio, \
+         (SELECT COUNT(*) FROM follows WHERE followee_id = u.user_id) AS follower_count, \
+         CASE WHEN vf.follower_id IS NOT NULL THEN 1 ELSE 0 END AS is_following \
+         FROM users u \
+         INNER JOIN follows f ON f.followee_id = u.user_id \
+                              AND f.follower_id = (SELECT user_id FROM users WHERE username = ?) \
+         LEFT JOIN follows vf ON vf.follower_id = ? AND vf.followee_id = u.user_id \
+         WHERE (? = '' OR u.username LIKE ? ESCAPE '\\') \
+         ORDER BY u.username \
+         LIMIT 21 OFFSET ?",
+    )
+    .bind(&username)
+    .bind(&viewer_id)
+    .bind(&query)
+    .bind(&pattern)
+    .bind(offset as i64)
+    .fetch_all(&pool)
+    .await
+    .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+    let has_more = rows.len() > 20;
+    let users = rows
+        .into_iter()
+        .take(20)
+        .map(|row| {
+            let user_id: String = row.get("user_id");
+            let is_following: bool = row.get::<i64, _>("is_following") != 0;
+            UserSearchResult {
+                username: row.get("username"),
+                bio: row.get("bio"),
+                follower_count: row.get("follower_count"),
+                is_following,
+                is_self: user_id == viewer_id,
+            }
+        })
+        .collect();
+
+    Ok(FollowPage { users, has_more })
+}
+
+#[component]
+fn SiteHeader() -> impl IntoView {
+    let current_user = Resource::new(|| (), |_| get_current_user());
+    view! {
+        <header class="site-header">
+            <A href="/" attr:class="logo">"Musicboxd"</A>
+            <A href="/users" attr:class="auth-link" attr:style="margin-left: 24px">"People"</A>
+            <div class="header-auth">
+                <Suspense fallback=|| ()>
+                    {move || current_user.get().map(|res| {
+                        match res {
+                            Ok(Some(username)) => view! {
+                                <A href=format!("/user/{}", username) attr:class="auth-user">{username.clone()}</A>
+                                <a class="auth-link" rel="external" href="/auth/logout">"Sign out"</a>
+                            }.into_any(),
+                            _ => view! {
+                                <a class="auth-link oauth-btn" rel="external" href="/auth/google">
+                                    <img class="oauth-icon" src="/google-icon.svg" alt="" width="14" height="14"/>
+                                    "Sign in with Google"
+                                </a>
+                                <a class="auth-link oauth-btn" rel="external" href="/auth/github">
+                                    <img class="oauth-icon" src="/github-icon.svg" alt="" width="14" height="14"/>
+                                    "Sign in with GitHub"
+                                </a>
+                            }.into_any(),
+                        }
+                    })}
+                </Suspense>
+            </div>
+        </header>
+    }
+}
+
 pub fn shell(options: LeptosOptions) -> impl IntoView {
     view! {
         <!DOCTYPE html>
@@ -475,11 +633,14 @@ pub fn App() -> impl IntoView {
     view! {
         <Title text="Musicboxd"/>
         <Router>
+            <SiteHeader/>
             <main>
                 <FlatRoutes fallback=|| "Page not found.".into_view()>
                     <Route path=StaticSegment("") view=HomePage/>
                     <Route path=StaticSegment("users") view=UserSearchPage/>
                     <Route path=(StaticSegment("album"), ParamSegment("id")) view=AlbumPage/>
+                    <Route path=(StaticSegment("user"), ParamSegment("username"), StaticSegment("followers")) view=FollowersPage/>
+                    <Route path=(StaticSegment("user"), ParamSegment("username"), StaticSegment("following")) view=FollowingPage/>
                     <Route path=(StaticSegment("user"), ParamSegment("username")) view=ProfilePage/>
                 </FlatRoutes>
             </main>
@@ -498,8 +659,6 @@ fn HomePage() -> impl IntoView {
     // Text box mirrors the URL query; kept in sync by the Effect below.
     let (input, set_input) = signal(url_q());
     Effect::new(move |_| set_input.set(url_q()));
-
-    let current_user = Resource::new(|| (), |_| get_current_user());
 
     // Infinite scroll: page number is in-memory only — scrolling is a session
     // gesture, not something to encode in the URL.
@@ -539,32 +698,6 @@ fn HomePage() -> impl IntoView {
 
 
     view! {
-        <header class="site-header">
-            <span class="logo">"Musicboxd"</span>
-            <A href="/users" attr:class="auth-link" attr:style="margin-left: 24px">"People"</A>
-            <div class="header-auth">
-                <Suspense fallback=|| ()>
-                    {move || current_user.get().map(|res| {
-                        match res {
-                            Ok(Some(username)) => view! {
-                                <A href=format!("/user/{}", username) attr:class="auth-user">{username.clone()}</A>
-                                <a class="auth-link" rel="external" href="/auth/logout">"Sign out"</a>
-                            }.into_any(),
-                            _ => view! {
-                                <a class="auth-link oauth-btn" rel="external" href="/auth/google">
-                                    <img class="oauth-icon" src="/google-icon.svg" alt="" width="14" height="14"/>
-                                    "Sign in with Google"
-                                </a>
-                                <a class="auth-link oauth-btn" rel="external" href="/auth/github">
-                                    <img class="oauth-icon" src="/github-icon.svg" alt="" width="14" height="14"/>
-                                    "Sign in with GitHub"
-                                </a>
-                            }.into_any(),
-                        }
-                    })}
-                </Suspense>
-            </div>
-        </header>
         <form class="search-form" on:submit=move |ev| {
             ev.prevent_default();
             let q = input.get_untracked();
@@ -654,10 +787,6 @@ fn AlbumPage() -> impl IntoView {
     let current_user_res = Resource::new(|| (), |_| get_current_user());
 
     view! {
-        <header class="site-header">
-            <A href="/" attr:class="logo">"Musicboxd"</A>
-            <A href="/users" attr:class="auth-link" attr:style="margin-left: 24px">"People"</A>
-        </header>
         <Suspense fallback=move || view! { <p class="status-msg">"Loading..."</p> }>
             {move || detail.get().map(|res| match res {
                 Err(e) => view! {
@@ -753,10 +882,6 @@ fn ProfilePage() -> impl IntoView {
     let (edit_error, set_edit_error) = signal(Option::<String>::None);
 
     view! {
-        <header class="site-header">
-            <A href="/" attr:class="logo">"Musicboxd"</A>
-            <A href="/users" attr:class="auth-link" attr:style="margin-left: 24px">"People"</A>
-        </header>
         <Suspense fallback=move || view! { <p class="status-msg">"Loading..."</p> }>
             {move || profile.get().map(|res| match res {
                 Err(e) => view! { <p class="status-msg">"Error: " {e.to_string()}</p> }.into_any(),
@@ -783,8 +908,12 @@ fn ProfilePage() -> impl IntoView {
                                 </div>
                             </div>
                             <div class="profile-stats">
-                                <span class="profile-stat"><strong>{follower_count}</strong>" followers"</span>
-                                <span class="profile-stat"><strong>{following_count}</strong>" following"</span>
+                                <A href=format!("/user/{}/followers", profile_username) attr:class="profile-stat">
+                                    <strong>{follower_count}</strong>" followers"
+                                </A>
+                                <A href=format!("/user/{}/following", profile_username.clone()) attr:class="profile-stat">
+                                    <strong>{following_count}</strong>" following"
+                                </A>
                             </div>
                             <div class="profile-actions">
                                 {if is_self {
@@ -910,36 +1039,9 @@ fn UserSearchPage() -> impl IntoView {
     let (input, set_input) = signal(url_q());
     Effect::new(move |_| set_input.set(url_q()));
 
-    let current_user = Resource::new(|| (), |_| get_current_user());
     let results = Resource::new(url_q, |q| async move { search_users(q).await });
 
     view! {
-        <header class="site-header">
-            <A href="/" attr:class="logo">"Musicboxd"</A>
-            <A href="/users" attr:class="auth-link" attr:style="margin-left: 24px">"People"</A>
-            <div class="header-auth">
-                <Suspense fallback=|| ()>
-                    {move || current_user.get().map(|res| {
-                        match res {
-                            Ok(Some(username)) => view! {
-                                <A href=format!("/user/{}", username) attr:class="auth-user">{username.clone()}</A>
-                                <a class="auth-link" rel="external" href="/auth/logout">"Sign out"</a>
-                            }.into_any(),
-                            _ => view! {
-                                <a class="auth-link oauth-btn" rel="external" href="/auth/google">
-                                    <img class="oauth-icon" src="/google-icon.svg" alt="" width="14" height="14"/>
-                                    "Sign in with Google"
-                                </a>
-                                <a class="auth-link oauth-btn" rel="external" href="/auth/github">
-                                    <img class="oauth-icon" src="/github-icon.svg" alt="" width="14" height="14"/>
-                                    "Sign in with GitHub"
-                                </a>
-                            }.into_any(),
-                        }
-                    })}
-                </Suspense>
-            </div>
-        </header>
         <form class="search-form" on:submit=move |ev| {
             ev.prevent_default();
             let q = input.get_untracked();
@@ -1030,6 +1132,202 @@ fn UserSearchPage() -> impl IntoView {
             })}
         </Suspense>
     }
+}
+
+#[component]
+fn FollowListPage(is_followers: bool) -> impl IntoView {
+    let params = use_params_map();
+    let query_map = use_query_map();
+    let navigate = use_navigate();
+
+    let username = move || params.read().get("username").unwrap_or_default();
+    let url_q = move || query_map.read().get("q").unwrap_or_default();
+
+    let (input, set_input) = signal(url_q());
+    Effect::new(move |_| set_input.set(url_q()));
+
+    let (page, set_page) = signal(1u32);
+    let (users, set_users) = signal(Vec::<UserSearchResult>::new());
+
+    let current_user = Resource::new(|| (), |_| get_current_user());
+
+    // Reset page and accumulated users when the target user or search query changes.
+    Effect::new(move |prev: Option<(String, String)>| {
+        let key = (username(), url_q());
+        if prev.as_ref() != Some(&key) {
+            set_page.set(1);
+            set_users.set(vec![]);
+        }
+        key
+    });
+
+    let page_result = Resource::new(
+        move || (username(), url_q(), page.get()),
+        move |(u, q, p)| async move {
+            if is_followers {
+                get_followers(u, q, p).await
+            } else {
+                get_following(u, q, p).await
+            }
+        },
+    );
+
+    // Accumulate pages: replace on page 1, append on subsequent pages.
+    Effect::new(move |_| {
+        let Some(Ok(result)) = page_result.get() else { return };
+        if page.get_untracked() == 1 {
+            set_users.set(result.users);
+        } else {
+            set_users.update(|u| u.extend(result.users));
+        }
+    });
+
+    view! {
+        <header class="site-header">
+            <A href="/" attr:class="logo">"Musicboxd"</A>
+            <A href="/users" attr:class="auth-link" attr:style="margin-left: 24px">"People"</A>
+            <div class="header-auth">
+                <Suspense fallback=|| ()>
+                    {move || current_user.get().map(|res| {
+                        match res {
+                            Ok(Some(cu)) => view! {
+                                <A href=format!("/user/{}", cu) attr:class="auth-user">{cu.clone()}</A>
+                                <a class="auth-link" rel="external" href="/auth/logout">"Sign out"</a>
+                            }.into_any(),
+                            _ => view! {
+                                <a class="auth-link oauth-btn" rel="external" href="/auth/google">
+                                    <img class="oauth-icon" src="/google-icon.svg" alt="" width="14" height="14"/>
+                                    "Sign in with Google"
+                                </a>
+                                <a class="auth-link oauth-btn" rel="external" href="/auth/github">
+                                    <img class="oauth-icon" src="/github-icon.svg" alt="" width="14" height="14"/>
+                                    "Sign in with GitHub"
+                                </a>
+                            }.into_any(),
+                        }
+                    })}
+                </Suspense>
+            </div>
+        </header>
+        <h2 class="status-msg">
+            {move || if is_followers {
+                format!("Followers of {}", username())
+            } else {
+                format!("{}'s following", username())
+            }}
+        </h2>
+        <form class="search-form" on:submit=move |ev| {
+            ev.prevent_default();
+            let q = input.get_untracked();
+            let base = if is_followers {
+                format!("/user/{}/followers", username())
+            } else {
+                format!("/user/{}/following", username())
+            };
+            let dest = if q.trim().is_empty() {
+                base
+            } else {
+                format!("{}?q={}", base, url_encode_query(&q))
+            };
+            navigate(&dest, Default::default());
+        }>
+            <input
+                class="search-input"
+                type="text"
+                placeholder="Filter by username..."
+                prop:value=move || input.get()
+                on:input=move |ev| set_input.set(event_target_value(&ev))
+            />
+            <button class="search-btn" type="submit">"Search"</button>
+        </form>
+        <ul class="results-list">
+            {move || users.get().into_iter().map(|user| {
+                let initial = user.username.chars().next().unwrap_or('?').to_uppercase().to_string();
+                let href = format!("/user/{}", user.username);
+                let followers = user.follower_count;
+                let uname = user.username.clone();
+                let uname_btn = uname.clone();
+                let is_self = user.is_self;
+                let is_following = user.is_following;
+                view! {
+                    <li class="result-card">
+                        <div class="user-result">
+                            <A href=href attr:class="user-result-link">
+                                <div class="profile-avatar user-avatar">{initial}</div>
+                                <div class="result-info">
+                                    <span class="result-title">{uname.clone()}</span>
+                                    {user.bio.as_deref().filter(|b| !b.is_empty()).map(|b| view! {
+                                        <span class="result-artist">{b.to_string()}</span>
+                                    })}
+                                    <div class="result-meta">
+                                        <span class="result-year">{followers} " followers"</span>
+                                    </div>
+                                </div>
+                            </A>
+                            {(!is_self).then(|| {
+                                let u = uname_btn.clone();
+                                let btn_class = if is_following { "follow-btn following" } else { "follow-btn" };
+                                let btn_label = if is_following { "Unfollow" } else { "Follow" };
+                                view! {
+                                    <div class="user-result-actions">
+                                        <button class=btn_class on:click=move |_| {
+                                            let uu = u.clone();
+                                            leptos::task::spawn_local(async move {
+                                                if is_following {
+                                                    let _ = unfollow_user(uu).await;
+                                                } else {
+                                                    let _ = follow_user(uu).await;
+                                                }
+                                                page_result.refetch();
+                                            });
+                                        }>{btn_label}</button>
+                                    </div>
+                                }
+                            })}
+                        </div>
+                    </li>
+                }
+            }).collect_view()}
+        </ul>
+        <Suspense fallback=move || {
+            if users.with(Vec::is_empty) {
+                view! { <p class="status-msg">"Loading..."</p> }.into_any()
+            } else {
+                view! { <p class="status-msg">"Loading more..."</p> }.into_any()
+            }
+        }>
+            {move || page_result.get().map(|res| match res {
+                Err(e) => view! {
+                    <p class="status-msg">"Error: " {e.to_string()}</p>
+                }.into_any(),
+                Ok(r) if r.users.is_empty() && page.get() == 1 && !url_q().trim().is_empty() => view! {
+                    <p class="status-msg">"No users found."</p>
+                }.into_any(),
+                Ok(r) if r.users.is_empty() && page.get() == 1 => view! {
+                    <p class="status-msg">"No users yet."</p>
+                }.into_any(),
+                Ok(r) if r.has_more => view! {
+                    <div class="load-more-bar">
+                        <button class="load-more-btn"
+                            on:click=move |_| set_page.update(|p| *p += 1)>
+                            "Load more"
+                        </button>
+                    </div>
+                }.into_any(),
+                Ok(_) => ().into_any(),
+            })}
+        </Suspense>
+    }
+}
+
+#[component]
+fn FollowersPage() -> impl IntoView {
+    view! { <FollowListPage is_followers=true/> }
+}
+
+#[component]
+fn FollowingPage() -> impl IntoView {
+    view! { <FollowListPage is_followers=false/> }
 }
 
 /// Encodes a search query for use in a URL query string.
