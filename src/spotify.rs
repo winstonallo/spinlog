@@ -176,26 +176,30 @@ impl SpotifyClient {
             .form(&[("grant_type", "client_credentials")])
             .send()
             .await
-            .map_err(|e| ServerFnError::new(format!("spotify token request: {e}")))?;
+            .map_err(|e| {
+                eprintln!("spotify token request error: {e}");
+                ServerFnError::new("internal server error")
+            })?;
 
         if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
             let secs = retry_after_secs(&response);
-            return Err(ServerFnError::new(format!(
-                "Spotify rate limited — retry after {secs}s"
-            )));
+            eprintln!("spotify token rate limited — retry after {secs}s");
+            return Err(ServerFnError::new("internal server error"));
         }
 
         if !response.status().is_success() {
             let status = response.status();
-            return Err(ServerFnError::new(format!(
-                "spotify token endpoint: HTTP {status}"
-            )));
+            eprintln!("spotify token endpoint: HTTP {status}");
+            return Err(ServerFnError::new("internal server error"));
         }
 
         let body: TokenResponse = response
             .json()
             .await
-            .map_err(|e| ServerFnError::new(format!("spotify token parse: {e}")))?;
+            .map_err(|e| {
+                eprintln!("spotify token parse error: {e}");
+                ServerFnError::new("internal server error")
+            })?;
 
         let expires_at = Instant::now() + Duration::from_secs(body.expires_in.saturating_sub(60));
         *cache = Some(CachedToken {
@@ -243,13 +247,19 @@ impl SpotifyClient {
         .bind(offset as i64)
         .fetch_optional(pool)
         .await
-        .map_err(|e| ServerFnError::new(format!("spotify search cache read: {e}")))?;
+        .map_err(|e| {
+            eprintln!("spotify search cache read DB error: {e}");
+            ServerFnError::new("internal server error")
+        })?;
 
         if let Some(row) = cache_row {
             let ids_json: String = row.get("spotify_ids");
             let total: i64 = row.get("total");
             let ids: Vec<String> = serde_json::from_str(&ids_json)
-                .map_err(|e| ServerFnError::new(format!("spotify search cache parse: {e}")))?;
+                .map_err(|e| {
+                    eprintln!("spotify search cache parse error: {e}");
+                    ServerFnError::new("internal server error")
+                })?;
             let albums = self.load_albums_by_ids_and_bump(pool, &ids).await?;
             return Ok(SearchPage { albums, total: total as usize });
         }
@@ -281,7 +291,10 @@ impl SpotifyClient {
                     .map(|a| a.name.as_str())
                     .collect::<Vec<_>>(),
             )
-            .map_err(|e| ServerFnError::new(format!("spotify artists serialize: {e}")))?;
+            .map_err(|e| {
+                eprintln!("spotify search artists serialize error: {e}");
+                ServerFnError::new("internal server error")
+            })?;
 
             upsert_album(
                 pool,
@@ -306,7 +319,10 @@ impl SpotifyClient {
             .bind(&spotify_id)
             .fetch_one(pool)
             .await
-            .map_err(|e| ServerFnError::new(format!("spotify hit count update: {e}")))?;
+            .map_err(|e| {
+                eprintln!("spotify search hit count update DB error: {e}");
+                ServerFnError::new("internal server error")
+            })?;
 
             if new_count % 100 == 0 {
                 let self_clone = self.clone();
@@ -337,7 +353,10 @@ impl SpotifyClient {
 
         // Cache this page by (query, offset).
         let ids_json = serde_json::to_string(&result_ids)
-            .map_err(|e| ServerFnError::new(format!("spotify ids serialize: {e}")))?;
+            .map_err(|e| {
+                eprintln!("spotify search ids serialize error: {e}");
+                ServerFnError::new("internal server error")
+            })?;
         sqlx::query(
             "INSERT OR REPLACE INTO spotify_search_cache \
              (query, result_offset, spotify_ids, total, cached_at) \
@@ -349,7 +368,10 @@ impl SpotifyClient {
         .bind(spotify_total as i64)
         .execute(pool)
         .await
-        .map_err(|e| ServerFnError::new(format!("spotify search cache write: {e}")))?;
+        .map_err(|e| {
+            eprintln!("spotify search cache write DB error: {e}");
+            ServerFnError::new("internal server error")
+        })?;
 
         Ok(SearchPage {
             albums,
@@ -380,26 +402,30 @@ impl SpotifyClient {
             .bearer_auth(&token)
             .send()
             .await
-            .map_err(|e| ServerFnError::new(format!("spotify get album request: {e}")))?;
+            .map_err(|e| {
+                eprintln!("spotify get album request error: {e}");
+                ServerFnError::new("internal server error")
+            })?;
 
         if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
             let secs = retry_after_secs(&response);
-            return Err(ServerFnError::new(format!(
-                "Spotify rate limited — retry after {secs}s"
-            )));
+            eprintln!("spotify get album rate limited — retry after {secs}s");
+            return Err(ServerFnError::new("internal server error"));
         }
 
         if !response.status().is_success() {
             let status = response.status();
-            return Err(ServerFnError::new(format!(
-                "Spotify get album failed: HTTP {status}"
-            )));
+            eprintln!("spotify get album failed: HTTP {status}");
+            return Err(ServerFnError::new("internal server error"));
         }
 
         let api_album: SpotifyApiAlbum = response
             .json()
             .await
-            .map_err(|e| ServerFnError::new(format!("spotify get album parse: {e}")))?;
+            .map_err(|e| {
+                eprintln!("spotify get album parse error: {e}");
+                ServerFnError::new("internal server error")
+            })?;
 
         let album = spotify_album_from_api(&api_album);
         let cover_art_url = best_image_url(&api_album.images);
@@ -410,7 +436,10 @@ impl SpotifyClient {
                 .map(|a| a.name.as_str())
                 .collect::<Vec<_>>(),
         )
-        .map_err(|e| ServerFnError::new(format!("spotify artists serialize: {e}")))?;
+        .map_err(|e| {
+            eprintln!("spotify get album artists serialize error: {e}");
+            ServerFnError::new("internal server error")
+        })?;
         let raw_json = serde_json::to_string(&AlbumRaw {
             id: &api_album.id,
             name: &api_album.name,
@@ -462,9 +491,8 @@ impl SpotifyClient {
                 .await?
                 .map(|r| spotify_album_from_db(&r))
                 .ok_or_else(|| {
-                    ServerFnError::new(format!(
-                        "spotify_albums row missing for {spotify_id} despite cached tracks"
-                    ))
+                    eprintln!("spotify_albums row missing for {spotify_id} despite cached tracks");
+                    ServerFnError::new("internal server error")
                 })?;
             return Ok(AlbumDetail { album, tracks });
         }
@@ -477,26 +505,30 @@ impl SpotifyClient {
             .bearer_auth(&token)
             .send()
             .await
-            .map_err(|e| ServerFnError::new(format!("spotify album detail request: {e}")))?;
+            .map_err(|e| {
+                eprintln!("spotify album detail request error: {e}");
+                ServerFnError::new("internal server error")
+            })?;
 
         if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
             let secs = retry_after_secs(&response);
-            return Err(ServerFnError::new(format!(
-                "Spotify rate limited — retry after {secs}s"
-            )));
+            eprintln!("spotify album detail rate limited — retry after {secs}s");
+            return Err(ServerFnError::new("internal server error"));
         }
 
         if !response.status().is_success() {
             let status = response.status();
-            return Err(ServerFnError::new(format!(
-                "Spotify album detail failed: HTTP {status}"
-            )));
+            eprintln!("spotify album detail failed: HTTP {status}");
+            return Err(ServerFnError::new("internal server error"));
         }
 
         let api_album: SpotifyApiAlbum = response
             .json()
             .await
-            .map_err(|e| ServerFnError::new(format!("spotify album detail parse: {e}")))?;
+            .map_err(|e| {
+                eprintln!("spotify album detail parse error: {e}");
+                ServerFnError::new("internal server error")
+            })?;
 
         let album = spotify_album_from_api(&api_album);
         let cover_art_url = best_image_url(&api_album.images);
@@ -507,7 +539,10 @@ impl SpotifyClient {
                 .map(|a| a.name.as_str())
                 .collect::<Vec<_>>(),
         )
-        .map_err(|e| ServerFnError::new(format!("spotify artists serialize: {e}")))?;
+        .map_err(|e| {
+            eprintln!("spotify album detail artists serialize error: {e}");
+            ServerFnError::new("internal server error")
+        })?;
         let raw_json = serde_json::to_string(&AlbumRaw {
             id: &api_album.id,
             name: &api_album.name,
@@ -548,7 +583,10 @@ impl SpotifyClient {
             let track_artists_json = serde_json::to_string(
                 &t.artists.iter().map(|a| a.name.as_str()).collect::<Vec<_>>(),
             )
-            .map_err(|e| ServerFnError::new(format!("spotify track artists serialize: {e}")))?;
+            .map_err(|e| {
+                eprintln!("spotify track artists serialize error: {e}");
+                ServerFnError::new("internal server error")
+            })?;
 
             sqlx::query(
                 "INSERT OR IGNORE INTO spotify_tracks \
@@ -564,7 +602,10 @@ impl SpotifyClient {
             .bind(t.duration_ms)
             .execute(pool)
             .await
-            .map_err(|e| ServerFnError::new(format!("spotify track insert: {e}")))?;
+            .map_err(|e| {
+                eprintln!("spotify track insert DB error: {e}");
+                ServerFnError::new("internal server error")
+            })?;
 
             tracks.push(track_from_api(t));
         }
@@ -589,7 +630,10 @@ impl SpotifyClient {
         .bind(spotify_id)
         .fetch_all(pool)
         .await
-        .map_err(|e| ServerFnError::new(format!("spotify tracks DB fetch: {e}")))?;
+        .map_err(|e| {
+            eprintln!("spotify tracks DB fetch error: {e}");
+            ServerFnError::new("internal server error")
+        })?;
 
         if rows.is_empty() {
             return Ok(None);
@@ -639,27 +683,31 @@ impl SpotifyClient {
             .bearer_auth(&token)
             .send()
             .await
-            .map_err(|e| ServerFnError::new(format!("spotify search request: {e}")))?;
+            .map_err(|e| {
+                eprintln!("spotify search request error: {e}");
+                ServerFnError::new("internal server error")
+            })?;
 
         if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
             let secs = retry_after_secs(&response);
-            return Err(ServerFnError::new(format!(
-                "Spotify rate limited — retry after {secs}s"
-            )));
+            eprintln!("spotify search rate limited — retry after {secs}s");
+            return Err(ServerFnError::new("internal server error"));
         }
 
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(ServerFnError::new(format!(
-                "Spotify search failed: HTTP {status} — {body}"
-            )));
+            eprintln!("spotify search failed: HTTP {status} — {body}");
+            return Err(ServerFnError::new("internal server error"));
         }
 
         let body: SpotifySearchResponse = response
             .json()
             .await
-            .map_err(|e| ServerFnError::new(format!("spotify search parse: {e}")))?;
+            .map_err(|e| {
+                eprintln!("spotify search parse error: {e}");
+                ServerFnError::new("internal server error")
+            })?;
 
         Ok((body.albums.items, body.albums.total))
     }
@@ -836,7 +884,10 @@ impl SpotifyClient {
                 .bind(id)
                 .fetch_one(pool)
                 .await
-                .map_err(|e| ServerFnError::new(format!("spotify hit count update: {e}")))?;
+                .map_err(|e| {
+                    eprintln!("spotify hit count update DB error: {e}");
+                    ServerFnError::new("internal server error")
+                })?;
 
                 if new_count % 100 == 0 {
                     let self_clone = self.clone();
@@ -880,7 +931,10 @@ async fn fetch_db_album(
     .bind(spotify_id)
     .fetch_optional(pool)
     .await
-    .map_err(|e| ServerFnError::new(format!("spotify db fetch: {e}")))?;
+    .map_err(|e| {
+        eprintln!("spotify db fetch error: {e}");
+        ServerFnError::new("internal server error")
+    })?;
 
     Ok(row.map(|r| DbSpotifyAlbum {
         spotify_id: r.get("spotify_id"),
@@ -918,7 +972,10 @@ async fn upsert_album(pool: &SqlitePool, data: &AlbumInsert<'_>) -> Result<(), S
     .bind(data.raw_json)
     .execute(pool)
     .await
-    .map_err(|e| ServerFnError::new(format!("spotify album upsert: {e}")))?;
+    .map_err(|e| {
+        eprintln!("spotify album upsert DB error: {e}");
+        ServerFnError::new("internal server error")
+    })?;
 
     Ok(())
 }
