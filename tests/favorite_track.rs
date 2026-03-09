@@ -6,7 +6,7 @@ static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 // spotify_album, and one release_group (linked via spotify_id).
 async fn insert_fixtures(pool: &SqlitePool) {
     sqlx::query(
-        "INSERT INTO users (user_id, username, email, password_hash) VALUES ('u1', 'alice', 'a@x.com', '')",
+        "INSERT INTO users (user_id, username, email) VALUES ('u1', 'alice', 'a@x.com')",
     )
     .execute(pool)
     .await
