@@ -1149,8 +1149,6 @@ fn FollowListPage(is_followers: bool) -> impl IntoView {
     let (page, set_page) = signal(1u32);
     let (users, set_users) = signal(Vec::<UserSearchResult>::new());
 
-    let current_user = Resource::new(|| (), |_| get_current_user());
-
     // Reset page and accumulated users when the target user or search query changes.
     Effect::new(move |prev: Option<(String, String)>| {
         let key = (username(), url_q());
@@ -1183,32 +1181,6 @@ fn FollowListPage(is_followers: bool) -> impl IntoView {
     });
 
     view! {
-        <header class="site-header">
-            <A href="/" attr:class="logo">"Musicboxd"</A>
-            <A href="/users" attr:class="auth-link" attr:style="margin-left: 24px">"People"</A>
-            <div class="header-auth">
-                <Suspense fallback=|| ()>
-                    {move || current_user.get().map(|res| {
-                        match res {
-                            Ok(Some(cu)) => view! {
-                                <A href=format!("/user/{}", cu) attr:class="auth-user">{cu.clone()}</A>
-                                <a class="auth-link" rel="external" href="/auth/logout">"Sign out"</a>
-                            }.into_any(),
-                            _ => view! {
-                                <a class="auth-link oauth-btn" rel="external" href="/auth/google">
-                                    <img class="oauth-icon" src="/google-icon.svg" alt="" width="14" height="14"/>
-                                    "Sign in with Google"
-                                </a>
-                                <a class="auth-link oauth-btn" rel="external" href="/auth/github">
-                                    <img class="oauth-icon" src="/github-icon.svg" alt="" width="14" height="14"/>
-                                    "Sign in with GitHub"
-                                </a>
-                            }.into_any(),
-                        }
-                    })}
-                </Suspense>
-            </div>
-        </header>
         <h2 class="status-msg">
             {move || if is_followers {
                 format!("Followers of {}", username())
