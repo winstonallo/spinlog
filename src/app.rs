@@ -56,6 +56,7 @@ pub struct UserProfile {
 pub struct MyRating {
     pub rating: u8,
     pub review: Option<String>,
+    pub favorite_track_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,6 +70,7 @@ pub struct UserRating {
     pub rating: u8,
     pub review: Option<String>,
     pub rated_at: String,
+    pub favorite_track_name: Option<String>,
 }
 
 /// A page of search results together with the total result count.
@@ -144,7 +146,10 @@ pub async fn get_user_profile(username: String) -> Result<Option<UserProfile>, S
     .bind(&username)
     .fetch_optional(&pool)
     .await
-    .map_err(|e| ServerFnError::new(e.to_string()))?;
+    .map_err(|e| {
+        eprintln!("get_user_profile DB error: {e}");
+        ServerFnError::new("internal server error")
+    })?;
 
     let Some(row) = row else { return Ok(None) };
 
@@ -212,7 +217,10 @@ pub async fn update_profile(new_username: String, new_bio: String) -> Result<(),
     .bind(&viewer.user_id)
     .fetch_one(&pool)
     .await
-    .map_err(|e| ServerFnError::new(e.to_string()))?;
+    .map_err(|e| {
+        eprintln!("update_profile username check DB error: {e}");
+        ServerFnError::new("internal server error")
+    })?;
 
     if taken > 0 {
         return Err(ServerFnError::new("Username is already taken".to_string()));
@@ -229,7 +237,10 @@ pub async fn update_profile(new_username: String, new_bio: String) -> Result<(),
     .bind(&viewer.user_id)
     .execute(&pool)
     .await
-    .map_err(|e| ServerFnError::new(e.to_string()))?;
+    .map_err(|e| {
+        eprintln!("update_profile DB error: {e}");
+        ServerFnError::new("internal server error")
+    })?;
 
     Ok(())
 }
@@ -243,18 +254,24 @@ pub async fn get_user_ratings(username: String) -> Result<Vec<UserRating>, Serve
 
     let rows = sqlx::query(
         "SELECT sa.spotify_id, sa.title, sa.artists, sa.album_type, sa.release_date, \
-         sa.cover_art IS NOT NULL AS has_cover_art, r.rating, r.review, r.created_at AS rated_at \
+         sa.cover_art IS NOT NULL AS has_cover_art, r.rating, r.review, r.created_at AS rated_at, \
+         st.name AS favorite_track_name \
          FROM ratings r \
          JOIN users u ON r.user_id = u.user_id \
          JOIN release_groups rg ON r.release_group_id = rg.release_group_id \
          JOIN spotify_albums sa ON rg.spotify_id = sa.spotify_id \
+         LEFT JOIN spotify_tracks st \
+           ON st.spotify_id = rg.spotify_id AND st.track_id = r.favorite_track_id \
          WHERE u.username = ? \
          ORDER BY r.created_at DESC",
     )
     .bind(&username)
     .fetch_all(&pool)
     .await
-    .map_err(|e| ServerFnError::new(e.to_string()))?;
+    .map_err(|e| {
+        eprintln!("get_user_ratings DB error: {e}");
+        ServerFnError::new("internal server error")
+    })?;
 
     let ratings = rows
         .into_iter()
@@ -278,6 +295,7 @@ pub async fn get_user_ratings(username: String) -> Result<Vec<UserRating>, Serve
                 rating: row.get::<i64, _>("rating") as u8,
                 review: row.get("review"),
                 rated_at: row.get("rated_at"),
+                favorite_track_name: row.get("favorite_track_name"),
             }
         })
         .collect();
@@ -290,6 +308,7 @@ pub async fn rate_album(
     spotify_id: String,
     rating: u8,
     review: Option<String>,
+    favorite_track_id: Option<String>,
 ) -> Result<(), ServerFnError> {
     use crate::auth::server::CurrentUser;
     use axum::Extension;
@@ -315,7 +334,10 @@ pub async fn rate_album(
     .bind(&spotify_id)
     .execute(&pool)
     .await
-    .map_err(|e| ServerFnError::new(e.to_string()))?;
+    .map_err(|e| {
+        eprintln!("rate_album release_groups upsert DB error: {e}");
+        ServerFnError::new("internal server error")
+    })?;
 
     let rg_id: String = sqlx::query_scalar(
         "SELECT release_group_id FROM release_groups WHERE spotify_id = ?",
@@ -323,16 +345,20 @@ pub async fn rate_album(
     .bind(&spotify_id)
     .fetch_optional(&pool)
     .await
-    .map_err(|e| ServerFnError::new(e.to_string()))?
+    .map_err(|e| {
+        eprintln!("rate_album release_group_id lookup DB error: {e}");
+        ServerFnError::new("internal server error")
+    })?
     .ok_or_else(|| ServerFnError::new("Album not found in cache".to_string()))?;
 
     let rating_id = Uuid::new_v4().to_string();
     sqlx::query(
-        "INSERT INTO ratings (rating_id, user_id, release_group_id, rating, review) \
-         VALUES (?, ?, ?, ?, ?) \
+        "INSERT INTO ratings (rating_id, user_id, release_group_id, rating, review, favorite_track_id) \
+         VALUES (?, ?, ?, ?, ?, ?) \
          ON CONFLICT(user_id, release_group_id) DO UPDATE SET \
          rating = excluded.rating, \
          review = excluded.review, \
+         favorite_track_id = excluded.favorite_track_id, \
          updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')",
     )
     .bind(&rating_id)
@@ -340,9 +366,13 @@ pub async fn rate_album(
     .bind(&rg_id)
     .bind(rating as i64)
     .bind(&review)
+    .bind(&favorite_track_id)
     .execute(&pool)
     .await
-    .map_err(|e| ServerFnError::new(e.to_string()))?;
+    .map_err(|e| {
+        eprintln!("rate_album ratings insert DB error: {e}");
+        ServerFnError::new("internal server error")
+    })?;
 
     Ok(())
 }
@@ -366,7 +396,10 @@ pub async fn delete_rating(spotify_id: String) -> Result<(), ServerFnError> {
     .bind(&spotify_id)
     .execute(&pool)
     .await
-    .map_err(|e| ServerFnError::new(e.to_string()))?;
+    .map_err(|e| {
+        eprintln!("delete_rating DB error: {e}");
+        ServerFnError::new("internal server error")
+    })?;
 
     Ok(())
 }
@@ -383,7 +416,7 @@ pub async fn get_my_rating(spotify_id: String) -> Result<Option<MyRating>, Serve
     let Some(viewer) = viewer else { return Ok(None) };
 
     let row = sqlx::query(
-        "SELECT r.rating, r.review FROM ratings r \
+        "SELECT r.rating, r.review, r.favorite_track_id FROM ratings r \
          JOIN release_groups rg ON r.release_group_id = rg.release_group_id \
          WHERE rg.spotify_id = ? AND r.user_id = ?",
     )
@@ -391,11 +424,15 @@ pub async fn get_my_rating(spotify_id: String) -> Result<Option<MyRating>, Serve
     .bind(&viewer.user_id)
     .fetch_optional(&pool)
     .await
-    .map_err(|e| ServerFnError::new(e.to_string()))?;
+    .map_err(|e| {
+        eprintln!("get_my_rating DB error: {e}");
+        ServerFnError::new("internal server error")
+    })?;
 
     Ok(row.map(|r| MyRating {
         rating: r.get::<i64, _>("rating") as u8,
         review: r.get("review"),
+        favorite_track_id: r.get("favorite_track_id"),
     }))
 }
 
@@ -417,7 +454,10 @@ pub async fn follow_user(target_username: String) -> Result<(), ServerFnError> {
     .bind(&target_username)
     .execute(&pool)
     .await
-    .map_err(|e| ServerFnError::new(e.to_string()))?;
+    .map_err(|e| {
+        eprintln!("follow_user DB error: {e}");
+        ServerFnError::new("internal server error")
+    })?;
 
     Ok(())
 }
@@ -440,7 +480,10 @@ pub async fn unfollow_user(target_username: String) -> Result<(), ServerFnError>
     .bind(&target_username)
     .execute(&pool)
     .await
-    .map_err(|e| ServerFnError::new(e.to_string()))?;
+    .map_err(|e| {
+        eprintln!("unfollow_user DB error: {e}");
+        ServerFnError::new("internal server error")
+    })?;
 
     Ok(())
 }
@@ -478,7 +521,10 @@ pub async fn search_users(query: String) -> Result<Vec<UserSearchResult>, Server
     .bind(&pattern)
     .fetch_all(&pool)
     .await
-    .map_err(|e| ServerFnError::new(e.to_string()))?;
+    .map_err(|e| {
+        eprintln!("search_users DB error: {e}");
+        ServerFnError::new("internal server error")
+    })?;
 
     let results = rows
         .into_iter()
@@ -535,7 +581,10 @@ pub async fn get_followers(
     .bind(offset as i64)
     .fetch_all(&pool)
     .await
-    .map_err(|e| ServerFnError::new(e.to_string()))?;
+    .map_err(|e| {
+        eprintln!("get_followers DB error: {e}");
+        ServerFnError::new("internal server error")
+    })?;
 
     let has_more = rows.len() > 20;
     let users = rows
@@ -594,7 +643,10 @@ pub async fn get_following(
     .bind(offset as i64)
     .fetch_all(&pool)
     .await
-    .map_err(|e| ServerFnError::new(e.to_string()))?;
+    .map_err(|e| {
+        eprintln!("get_following DB error: {e}");
+        ServerFnError::new("internal server error")
+    })?;
 
     let has_more = rows.len() > 20;
     let users = rows
@@ -828,15 +880,12 @@ fn AlbumPage() -> impl IntoView {
     let current_user_res = Resource::new(|| (), |_| get_current_user());
 
     let (review_text, set_review_text) = signal(String::new());
+    let (fav_track, set_fav_track) = signal(String::new());
 
     Effect::new(move |_| {
-        let text = my_rating
-            .get()
-            .and_then(|r| r.ok())
-            .flatten()
-            .and_then(|mr| mr.review)
-            .unwrap_or_default();
-        set_review_text.set(text);
+        let mr = my_rating.get().and_then(|r| r.ok()).flatten();
+        set_review_text.set(mr.as_ref().and_then(|m| m.review.clone()).unwrap_or_default());
+        set_fav_track.set(mr.and_then(|m| m.favorite_track_id).unwrap_or_default());
     });
 
     view! {
@@ -849,6 +898,7 @@ fn AlbumPage() -> impl IntoView {
                     let cover_src = format!("/album-art/{}", d.album.spotify_id);
                     let artists = d.album.artists.join(", ");
                     let year = d.album.release_year.map(|y| y.to_string()).unwrap_or_else(|| "????".to_string());
+                    let tracks_for_rating = d.tracks.clone();
                     view! {
                         <div class="album-detail">
                             <div class="album-header">
@@ -904,11 +954,13 @@ fn AlbumPage() -> impl IntoView {
                                                             let s = sid2.clone();
                                                             let review = review_text.get_untracked();
                                                             let review = if review.trim().is_empty() { None } else { Some(review) };
+                                                            let fav = fav_track.get_untracked();
+                                                            let fav = if fav.trim().is_empty() { None } else { Some(fav) };
                                                             leptos::task::spawn_local(async move {
                                                                 if selected {
                                                                     let _ = delete_rating(s).await;
                                                                 } else {
-                                                                    let _ = rate_album(s, dot, review).await;
+                                                                    let _ = rate_album(s, dot, review, fav).await;
                                                                 }
                                                                 my_rating.refetch();
                                                             });
@@ -917,6 +969,24 @@ fn AlbumPage() -> impl IntoView {
                                                 }
                                             }).collect_view()}
                                         </div>
+                                        {(tracks_for_rating.len() > 1).then(|| {
+                                            let tracks = tracks_for_rating.clone();
+                                            view! {
+                                                <div class="fav-track-row">
+                                                    <span class="rating-label">"Favorite track: "</span>
+                                                    <select
+                                                        class="fav-track-select"
+                                                        prop:value=move || fav_track.get()
+                                                        on:change=move |ev| set_fav_track.set(event_target_value(&ev))
+                                                    >
+                                                        <option value="">"— none —"</option>
+                                                        {tracks.into_iter().map(|t| {
+                                                            view! { <option value=t.track_id>{t.name}</option> }
+                                                        }).collect_view()}
+                                                    </select>
+                                                </div>
+                                            }
+                                        })}
                                         <textarea
                                             class="review-textarea"
                                             placeholder="Write a review..."
@@ -933,8 +1003,10 @@ fn AlbumPage() -> impl IntoView {
                                                     let s = sid.clone();
                                                     let review = review_text.get_untracked();
                                                     let review = if review.trim().is_empty() { None } else { Some(review) };
+                                                    let fav = fav_track.get_untracked();
+                                                    let fav = if fav.trim().is_empty() { None } else { Some(fav) };
                                                     leptos::task::spawn_local(async move {
-                                                        let _ = rate_album(s, r, review).await;
+                                                        let _ = rate_album(s, r, review, fav).await;
                                                         my_rating.refetch();
                                                     });
                                                 }
@@ -1099,6 +1171,9 @@ fn ProfilePage() -> impl IntoView {
                                                             </div>
                                                             {r.review.as_deref().filter(|rev| !rev.is_empty()).map(|rev| view! {
                                                                 <p class="rating-review">{rev.to_string()}</p>
+                                                            })}
+                                                            {r.favorite_track_name.as_deref().filter(|t| !t.is_empty()).map(|t| view! {
+                                                                <p class="fav-track-label">"♥ " {t.to_string()}</p>
                                                             })}
                                                         </div>
                                                     </A>

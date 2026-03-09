@@ -129,8 +129,8 @@ pub mod server {
             .execute(&pool)
             .await;
 
-        let client = BasicClient::new(ClientId::new(config.google_client_id))
-            .set_client_secret(ClientSecret::new(config.google_client_secret))
+        let client = BasicClient::new(ClientId::new(config.google_client_id.clone()))
+            .set_client_secret(ClientSecret::new(config.google_client_secret.clone()))
             .set_auth_uri(
                 AuthUrl::new("https://accounts.google.com/o/oauth2/v2/auth".to_string())
                     .unwrap(),
@@ -185,7 +185,7 @@ pub mod server {
             }
         };
 
-        match complete_login(&pool, "google", &info.sub, &info.email, &info.email).await {
+        match complete_login(&pool, &config, "google", &info.sub, &info.email, &info.email).await {
             Ok(resp) => resp,
             Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response(),
         }
@@ -253,8 +253,8 @@ pub mod server {
             .execute(&pool)
             .await;
 
-        let client = BasicClient::new(ClientId::new(config.github_client_id))
-            .set_client_secret(ClientSecret::new(config.github_client_secret))
+        let client = BasicClient::new(ClientId::new(config.github_client_id.clone()))
+            .set_client_secret(ClientSecret::new(config.github_client_secret.clone()))
             .set_auth_uri(
                 AuthUrl::new("https://github.com/login/oauth/authorize".to_string()).unwrap(),
             )
@@ -338,7 +338,7 @@ pub mod server {
         };
 
         let provider_uid = user.id.to_string();
-        match complete_login(&pool, "github", &provider_uid, &email, &user.login).await {
+        match complete_login(&pool, &config, "github", &provider_uid, &email, &user.login).await {
             Ok(resp) => resp,
             Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response(),
         }
@@ -346,6 +346,7 @@ pub mod server {
 
     pub async fn logout(
         Extension(pool): Extension<SqlitePool>,
+        Extension(config): Extension<OAuthConfig>,
         headers: axum::http::HeaderMap,
     ) -> impl IntoResponse {
         if let Some(session_id) = extract_session_id(&headers) {
@@ -354,12 +355,17 @@ pub mod server {
                 .execute(&pool)
                 .await;
         }
+        let secure_flag = if config.base_url.starts_with("https") {
+            "; Secure"
+        } else {
+            ""
+        };
         Response::builder()
             .status(StatusCode::FOUND)
             .header(header::LOCATION, "/")
             .header(
                 header::SET_COOKIE,
-                "session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0",
+                format!("session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0{}", secure_flag),
             )
             .body(axum::body::Body::empty())
             .unwrap()
@@ -402,6 +408,7 @@ pub mod server {
 
     async fn complete_login(
         pool: &SqlitePool,
+        config: &OAuthConfig,
         provider: &str,
         provider_uid: &str,
         email: &str,
@@ -424,14 +431,19 @@ pub mod server {
         let expires = httpdate::fmt_http_date(
             std::time::SystemTime::now() + std::time::Duration::from_secs(max_age),
         );
+        let secure_flag = if config.base_url.starts_with("https") {
+            "; Secure"
+        } else {
+            ""
+        };
         Ok(Response::builder()
             .status(StatusCode::FOUND)
             .header(header::LOCATION, "/")
             .header(
                 header::SET_COOKIE,
                 format!(
-                    "session={}; HttpOnly; SameSite=Lax; Path=/; Max-Age={}; Expires={}",
-                    session_id, max_age, expires
+                    "session={}; HttpOnly; SameSite=Lax; Path=/; Max-Age={}; Expires={}{}",
+                    session_id, max_age, expires, secure_flag
                 ),
             )
             .body(axum::body::Body::empty())
