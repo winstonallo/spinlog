@@ -8,7 +8,8 @@ pub mod server {
     };
     use oauth2::{
         basic::BasicClient, AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken,
-        PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope, TokenResponse, TokenUrl,
+        EndpointNotSet, EndpointSet, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope,
+        TokenResponse, TokenUrl,
     };
     use serde::Deserialize;
     use sqlx::{Row, SqlitePool};
@@ -64,22 +65,51 @@ pub mod server {
         state: String,
     }
 
+    type ConfiguredClient =
+        BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
+
+    fn build_google_client(config: &OAuthConfig) -> Result<ConfiguredClient, String> {
+        let auth_url = AuthUrl::new("https://accounts.google.com/o/oauth2/v2/auth".to_string())
+            .map_err(|e| format!("invalid Google auth URL: {e}"))?;
+        let token_url = TokenUrl::new("https://oauth2.googleapis.com/token".to_string())
+            .map_err(|e| format!("invalid Google token URL: {e}"))?;
+        let redirect_url =
+            RedirectUrl::new(format!("{}/auth/google/callback", config.base_url))
+                .map_err(|e| format!("invalid Google redirect URL: {e}"))?;
+        Ok(BasicClient::new(ClientId::new(config.google_client_id.clone()))
+            .set_client_secret(ClientSecret::new(config.google_client_secret.clone()))
+            .set_auth_uri(auth_url)
+            .set_token_uri(token_url)
+            .set_redirect_uri(redirect_url))
+    }
+
+    fn build_github_client(config: &OAuthConfig) -> Result<ConfiguredClient, String> {
+        let auth_url = AuthUrl::new("https://github.com/login/oauth/authorize".to_string())
+            .map_err(|e| format!("invalid GitHub auth URL: {e}"))?;
+        let token_url =
+            TokenUrl::new("https://github.com/login/oauth/access_token".to_string())
+                .map_err(|e| format!("invalid GitHub token URL: {e}"))?;
+        let redirect_url =
+            RedirectUrl::new(format!("{}/auth/github/callback", config.base_url))
+                .map_err(|e| format!("invalid GitHub redirect URL: {e}"))?;
+        Ok(BasicClient::new(ClientId::new(config.github_client_id.clone()))
+            .set_client_secret(ClientSecret::new(config.github_client_secret.clone()))
+            .set_auth_uri(auth_url)
+            .set_token_uri(token_url)
+            .set_redirect_uri(redirect_url))
+    }
+
     pub async fn google_login(
         Extension(config): Extension<OAuthConfig>,
         Extension(pool): Extension<SqlitePool>,
     ) -> impl IntoResponse {
-        let client = BasicClient::new(ClientId::new(config.google_client_id))
-            .set_client_secret(ClientSecret::new(config.google_client_secret))
-            .set_auth_uri(
-                AuthUrl::new("https://accounts.google.com/o/oauth2/v2/auth".to_string())
-                    .unwrap(),
-            )
-            .set_token_uri(
-                TokenUrl::new("https://oauth2.googleapis.com/token".to_string()).unwrap(),
-            )
-            .set_redirect_uri(
-                RedirectUrl::new(format!("{}/auth/google/callback", config.base_url)).unwrap(),
-            );
+        let client = match build_google_client(&config) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("google_login: failed to build OAuth client: {e}");
+                return (StatusCode::INTERNAL_SERVER_ERROR, "OAuth misconfigured").into_response();
+            }
+        };
 
         let (challenge, verifier) = PkceCodeChallenge::new_random_sha256();
         let (url, csrf) = client
@@ -129,23 +159,18 @@ pub mod server {
             .execute(&pool)
             .await;
 
-        let client = BasicClient::new(ClientId::new(config.google_client_id.clone()))
-            .set_client_secret(ClientSecret::new(config.google_client_secret.clone()))
-            .set_auth_uri(
-                AuthUrl::new("https://accounts.google.com/o/oauth2/v2/auth".to_string())
-                    .unwrap(),
-            )
-            .set_token_uri(
-                TokenUrl::new("https://oauth2.googleapis.com/token".to_string()).unwrap(),
-            )
-            .set_redirect_uri(
-                RedirectUrl::new(format!("{}/auth/google/callback", config.base_url)).unwrap(),
-            );
+        let client = match build_google_client(&config) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("google_callback: failed to build OAuth client: {e}");
+                return (StatusCode::INTERNAL_SERVER_ERROR, "OAuth misconfigured").into_response();
+            }
+        };
 
         let http_client = reqwest::ClientBuilder::new()
             .redirect(reqwest::redirect::Policy::none())
             .build()
-            .unwrap();
+            .expect("failed to build reqwest client");
 
         let token = client
             .exchange_code(AuthorizationCode::new(params.code))
@@ -195,18 +220,13 @@ pub mod server {
         Extension(config): Extension<OAuthConfig>,
         Extension(pool): Extension<SqlitePool>,
     ) -> impl IntoResponse {
-        let client = BasicClient::new(ClientId::new(config.github_client_id))
-            .set_client_secret(ClientSecret::new(config.github_client_secret))
-            .set_auth_uri(
-                AuthUrl::new("https://github.com/login/oauth/authorize".to_string()).unwrap(),
-            )
-            .set_token_uri(
-                TokenUrl::new("https://github.com/login/oauth/access_token".to_string())
-                    .unwrap(),
-            )
-            .set_redirect_uri(
-                RedirectUrl::new(format!("{}/auth/github/callback", config.base_url)).unwrap(),
-            );
+        let client = match build_github_client(&config) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("github_login: failed to build OAuth client: {e}");
+                return (StatusCode::INTERNAL_SERVER_ERROR, "OAuth misconfigured").into_response();
+            }
+        };
 
         let (url, csrf) = client
             .authorize_url(CsrfToken::new_random)
@@ -253,23 +273,18 @@ pub mod server {
             .execute(&pool)
             .await;
 
-        let client = BasicClient::new(ClientId::new(config.github_client_id.clone()))
-            .set_client_secret(ClientSecret::new(config.github_client_secret.clone()))
-            .set_auth_uri(
-                AuthUrl::new("https://github.com/login/oauth/authorize".to_string()).unwrap(),
-            )
-            .set_token_uri(
-                TokenUrl::new("https://github.com/login/oauth/access_token".to_string())
-                    .unwrap(),
-            )
-            .set_redirect_uri(
-                RedirectUrl::new(format!("{}/auth/github/callback", config.base_url)).unwrap(),
-            );
+        let client = match build_github_client(&config) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("github_callback: failed to build OAuth client: {e}");
+                return (StatusCode::INTERNAL_SERVER_ERROR, "OAuth misconfigured").into_response();
+            }
+        };
 
         let http_client = reqwest::ClientBuilder::new()
             .redirect(reqwest::redirect::Policy::none())
             .build()
-            .unwrap();
+            .expect("failed to build reqwest client");
 
         let token = client
             .exchange_code(AuthorizationCode::new(params.code))
